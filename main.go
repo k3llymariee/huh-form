@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -53,14 +56,18 @@ func NewStyles(lg *lipgloss.Renderer) *Styles {
 	return &s
 }
 
-type state int
+type input struct {
+	key      string
+	required bool
+	valType  string
+}
 
 type Model struct {
-	state  state
 	lg     *lipgloss.Renderer
 	styles *Styles
 	form   *huh.Form
 	width  int
+	inputs []input
 }
 
 func NewModel() Model {
@@ -68,36 +75,56 @@ func NewModel() Model {
 	m.lg = lipgloss.DefaultRenderer()
 	m.styles = NewStyles(m.lg)
 
-	m.form = huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Name ").
-				Prompt("").
-				Inline(true),
+	m.inputs = []input{
+		{key: "key", required: true, valType: "string"},
+		{key: "name", required: true, valType: "string"},
+		{key: "description", required: false, valType: "string"},
+		{key: "includeInSnippet", required: false, valType: "boolean"},
+	}
 
-			huh.NewInput().
-				Title("Key ").
-				Prompt("").
-				Inline(true),
-
-			huh.NewSelect[string]().
-				Key("includeInSnippet").
+	fields := make([]huh.Field, 0)
+	for _, i := range m.inputs {
+		var field huh.Field
+		switch i.valType {
+		case "boolean":
+			field = huh.NewSelect[string]().
+				Key(i.key).
 				Options(huh.NewOptions("true", "false")...).
-				Title("Include in snippet").
-				Inline(true),
+				Title(i.key + " ").
+				Inline(true)
 
-			huh.NewConfirm().
-				Key("done").
-				Title("All done?").
-				Validate(func(v bool) error {
-					if !v {
-						return fmt.Errorf("Welp, finish up then")
+		default:
+			field = huh.NewInput().
+				Key(i.key).
+				Title(i.key + " ").
+				Prompt("").
+				Inline(true).
+				Validate(func(t string) error {
+					if t == "" {
+						return fmt.Errorf("%s is a required field", i.key)
 					}
 					return nil
-				}).
-				Affirmative("Yep").
-				Negative("Wait, no"),
-		),
+				})
+		}
+
+		fields = append(fields, field)
+	}
+
+	fields = append(fields, huh.NewConfirm().
+		Key("done").
+		Title("All done?").
+		Validate(func(v bool) error {
+			if !v {
+				return fmt.Errorf("Welp, finish up then")
+			}
+			return nil
+		}).
+		Affirmative("Yep").
+		Negative("Wait, no"),
+	)
+
+	m.form = huh.NewForm(
+		huh.NewGroup(fields...),
 	).
 		WithWidth(45).
 		WithShowHelp(false).
@@ -146,7 +173,9 @@ func (m Model) View() string {
 	case huh.StateCompleted:
 
 		var b strings.Builder
-		fmt.Fprintf(&b, "Congratulations, you did the thing. Press ctrl+c to quit")
+		data := m.getData()
+		dataJson, _ := json.MarshalIndent(data, "", "  ")
+		fmt.Fprintf(&b, string(dataJson))
 		return s.Status.Margin(0, 1).Padding(1, 2).Width(48).Render(b.String()) + "\n\n"
 	default:
 		v := strings.TrimSuffix(m.form.View(), "\n\n")
@@ -194,6 +223,37 @@ func (m Model) appErrorBoundaryView(text string) string {
 		lipgloss.WithWhitespaceChars("/"),
 		lipgloss.WithWhitespaceForeground(red),
 	)
+}
+
+func (m Model) getData() map[string]any {
+	log.Println(m.form)
+
+	formData := make(map[string]any)
+	for _, i := range m.inputs {
+		log.Println(i.key)
+		inputValue := m.form.GetString(i.key)
+		log.Println(inputValue)
+		if inputValue != "" {
+			var val any
+			switch i.valType {
+			case "string":
+				val = inputValue
+			case "array":
+				val = strings.Split(inputValue, ",")
+			case "boolean":
+				val, _ = strconv.ParseBool(inputValue)
+				// TODO: handle error
+			case "integer":
+				val, _ = strconv.Atoi(inputValue)
+				// TODO: handle error
+			case "object":
+				// TODO
+			}
+			formData[i.key] = val
+		}
+	}
+
+	return formData
 }
 
 func main() {
