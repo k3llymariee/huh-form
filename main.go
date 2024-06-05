@@ -55,11 +55,6 @@ func NewStyles(lg *lipgloss.Renderer) *Styles {
 
 type state int
 
-const (
-	statusNormal state = iota
-	stateDone
-)
-
 type Model struct {
 	state  state
 	lg     *lipgloss.Renderer
@@ -75,17 +70,21 @@ func NewModel() Model {
 
 	m.form = huh.NewForm(
 		huh.NewGroup(
-			huh.NewSelect[string]().
-				Key("class").
-				Options(huh.NewOptions("Warrior", "Mage", "Rogue")...).
-				Title("Choose your class").
-				Description("This will determine your department"),
+			huh.NewInput().
+				Title("Name ").
+				Prompt("").
+				Inline(true),
+
+			huh.NewInput().
+				Title("Key ").
+				Prompt("").
+				Inline(true),
 
 			huh.NewSelect[string]().
-				Key("level").
-				Options(huh.NewOptions("1", "20", "9999")...).
-				Title("Choose your level").
-				Description("This will determine your benefits package"),
+				Key("includeInSnippet").
+				Options(huh.NewOptions("true", "false")...).
+				Title("Include in snippet").
+				Inline(true),
 
 			huh.NewConfirm().
 				Key("done").
@@ -137,11 +136,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	if m.form.State == huh.StateCompleted {
-		// Quit when the form is done.
-		cmds = append(cmds, tea.Quit)
-	}
-
 	return m, tea.Batch(cmds...)
 }
 
@@ -150,61 +144,20 @@ func (m Model) View() string {
 
 	switch m.form.State {
 	case huh.StateCompleted:
-		title, role := m.getRole()
-		title = s.Highlight.Render(title)
+
 		var b strings.Builder
-		fmt.Fprintf(&b, "Congratulations, you’re Charm’s newest\n%s!\n\n", title)
-		fmt.Fprintf(&b, "Your job description is as follows:\n\n%s\n\nPlease proceed to HR immediately.", role)
+		fmt.Fprintf(&b, "Congratulations, you did the thing. Press ctrl+c to quit")
 		return s.Status.Margin(0, 1).Padding(1, 2).Width(48).Render(b.String()) + "\n\n"
 	default:
-
-		var class string
-		if m.form.GetString("class") != "" {
-			class = "Class: " + m.form.GetString("class")
-		}
-
-		// Form (left side)
 		v := strings.TrimSuffix(m.form.View(), "\n\n")
 		form := m.lg.NewStyle().Margin(1, 0).Render(v)
 
-		// Status (right side)
-		var status string
-		{
-			var (
-				buildInfo      = "(None)"
-				role           string
-				jobDescription string
-				level          string
-			)
-
-			if m.form.GetString("level") != "" {
-				level = "Level: " + m.form.GetString("level")
-				role, jobDescription = m.getRole()
-				role = "\n\n" + s.StatusHeader.Render("Projected Role") + "\n" + role
-				jobDescription = "\n\n" + s.StatusHeader.Render("Duties") + "\n" + jobDescription
-			}
-			if m.form.GetString("class") != "" {
-				buildInfo = fmt.Sprintf("%s\n%s", class, level)
-			}
-
-			const statusWidth = 28
-			statusMarginLeft := m.width - statusWidth - lipgloss.Width(form) - s.Status.GetMarginRight()
-			status = s.Status.
-				Height(lipgloss.Height(form)).
-				Width(statusWidth).
-				MarginLeft(statusMarginLeft).
-				Render(s.StatusHeader.Render("Current Build") + "\n" +
-					buildInfo +
-					role +
-					jobDescription)
-		}
-
 		errors := m.form.Errors()
-		header := m.appBoundaryView("Charm Employment Application")
+		header := m.appBoundaryView("{Create} a {thing}}")
 		if len(errors) > 0 {
 			header = m.appErrorBoundaryView(m.errorView())
 		}
-		body := lipgloss.JoinHorizontal(lipgloss.Top, form, status)
+		body := lipgloss.JoinHorizontal(lipgloss.Top, form)
 
 		footer := m.appBoundaryView(m.form.Help().ShortHelpView(m.form.KeyBinds()))
 		if len(errors) > 0 {
@@ -243,43 +196,14 @@ func (m Model) appErrorBoundaryView(text string) string {
 	)
 }
 
-func (m Model) getRole() (string, string) {
-	level := m.form.GetString("level")
-	switch m.form.GetString("class") {
-	case "Warrior":
-		switch level {
-		case "1":
-			return "Tank Intern", "Assists with tank-related activities. Paid position."
-		case "9999":
-			return "Tank Manager", "Manages tanks and tank-related activities."
-		default:
-			return "Tank", "General tank. Does damage, takes damage. Responsible for tanking."
-		}
-	case "Mage":
-		switch level {
-		case "1":
-			return "DPS Associate", "Finds DPS deals and passes them on to DPS Manager."
-		case "9999":
-			return "DPS Operating Officer", "Oversees all DPS activities."
-		default:
-			return "DPS", "Does damage and ideally does not take damage. Logs hours in JIRA."
-		}
-	case "Rogue":
-		switch level {
-		case "1":
-			return "Stealth Junior Designer", "Designs rougue-like activities. Reports to Stealth Lead."
-		case "9999":
-			return "Stealth Lead", "Lead designer for all things stealth. Some travel required."
-		default:
-			return "Sneaky Person", "Sneaks around and does sneaky things. Reports to Stealth Lead."
-		}
-	default:
-		return "", ""
-	}
-}
-
 func main() {
-	_, err := tea.NewProgram(NewModel()).Run()
+	f, err := tea.LogToFile("debug.log", "")
+	if err != nil {
+		fmt.Println("could not open file for debuggin", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+	_, err = tea.NewProgram(NewModel(), tea.WithAltScreen()).Run()
 	if err != nil {
 		fmt.Println("Oh no:", err)
 		os.Exit(1)
